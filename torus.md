@@ -79,3 +79,52 @@ list_validator = validator_factory("non_empty_list")
 assert list_validator([1, 2]) is True
 assert list_validator([]) is False
 ```
+
+3. Посложнее
+```Python
+# Test 11: Pi-type for half value
+half = Pi(
+    domain=int,
+    codomain=lambda n: int if n % 2 == 0 else float,
+    function=lambda n: n // 2 if n % 2 == 0 else float(n / 2),
+)
+
+h2 = half(2)
+h3 = half(3)
+assert isinstance(h2, int)
+assert int(h2*2) == 2
+assert isinstance(h3, float)
+assert int(h3*2) == 3
+```
+
+```Python
+# Test 12: Combo
+value_half_quarter = Pi(
+    domain=int,
+    codomain=lambda n: Sigma,
+    function=lambda n: Sigma(
+        domain=int,
+        codomain=lambda n: Sigma,
+        first=n,
+        second=Sigma(
+            domain=object,
+            codomain=lambda h: object if isinstance(h, int) else Unit,
+            first=half(n),
+            second=half(half(n)) if isinstance(half(n), int) else unit
+        )
+    )
+)
+
+vhq6 = value_half_quarter(6)
+assert vhq6.first == 6
+assert isinstance(vhq6.second.first, int)
+assert vhq6.second.first == 3
+assert isinstance(vhq6.second.second, float)
+assert int(vhq6.second.second*2) == 3
+
+vhq5 = value_half_quarter(5)
+assert vhq5.first == 5
+assert isinstance(vhq5.second.first, float)
+assert (vhq5.second.first*2) == 5
+assert vhq5.second.second == unit
+```
