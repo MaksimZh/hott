@@ -1,0 +1,346 @@
+From 02de6ea90ce5c839908f0159fa3988420adc7000 Mon Sep 17 00:00:00 2001
+From: Maksim Zholudev <maximzms@gmail.com>
+Date: Wed, 23 Jul 2025 09:31:21 +0300
+Subject: [PATCH] Add demo
+
+---
+ core/hits.py            |  2 +-
+ game_data_structures.py | 44 ++++++++++++++++++++++++-------
+ game_engine.py          | 57 ++++++++++++++++++++++++++++++++++++++---
+ game_field.py           | 14 +++++++---
+ input_handler.py        | 16 ++++++++++++
+ main.py                 |  1 +
+ renderer.py             |  9 ++++++-
+ 7 files changed, 125 insertions(+), 18 deletions(-)
+
+diff --git a/core/hits.py b/core/hits.py
+index 74064b1..8a78bb6 100644
+--- a/core/hits.py
++++ b/core/hits.py
+@@ -104,7 +104,7 @@ class NTorus:
+     
+     def canonical_form(self, point):
+         if isinstance(point, TorusLoopCount):
+-            return point
++            return TorusLoopCount([c % 1 for c in point.counts])
+         return TorusLoopCount([0] * self._dimensions)
+     
+     def rec(self, target_type, base_value, loop_functions, coherence_functions):
+diff --git a/game_data_structures.py b/game_data_structures.py
+index f4bb7f2..baedea1 100644
+--- a/game_data_structures.py
++++ b/game_data_structures.py
+@@ -112,7 +112,7 @@ class GameState:
+     """
+     
+     def __init__(self, snake, food_position: Product, 
+-                 score: int = 0):
++                 score: int = 0, is_demo: bool = False):
+         """
+         Инициализация состояния игры: змейка, 
+         позиция еды, счет и флаги управления.
+@@ -125,8 +125,10 @@ class GameState:
+         # Хранение змейки и еды вместе в Product
+         self.entity_state = Product(snake, food_position)
+         
++        self.game_state = Product(score, is_demo)
++        
+         # Хранение состояния и счета в Product
+-        self.state = Product(self.entity_state, score)
++        self.state = Product(self.entity_state, self.game_state)
+         
+         # Флаги управления игрой
+         self.paused = False
+@@ -143,7 +145,11 @@ class GameState:
+     
+     def get_score(self) -> int:
+         """Получение текущего счета"""
+-        return self.state.second_value
++        return self.game_state.first_value
++    
++    def is_demo(self) -> int:
++        """Проверка находимся ли мы в демо режиме"""
++        return self.game_state.second_value
+     
+     def is_paused(self) -> bool:
+         """Проверка приостановки игры"""
+@@ -161,7 +167,8 @@ class GameState:
+         """Создание состояния с обновленной змейкой"""
+         new_state = GameState(new_snake, 
+                               self.get_food_position(), 
+-                              self.get_score())
++                              self.get_score(),
++                              self.is_demo())
+         new_state.paused = self.paused
+         new_state.game_over = self.game_over
+         new_state.quit_requested = self.quit_requested
+@@ -174,7 +181,8 @@ class GameState:
+         """
+         new_state = GameState(self.get_snake(), 
+                               new_food_position, 
+-                              self.get_score())
++                              self.get_score(),
++                              self.is_demo())
+         new_state.paused = self.paused
+         new_state.game_over = self.game_over
+         new_state.quit_requested = self.quit_requested
+@@ -185,7 +193,8 @@ class GameState:
+         new_score = self.get_score() + points
+         new_state = GameState(self.get_snake(), 
+                               self.get_food_position(), 
+-                              new_score)
++                              new_score,
++                              self.is_demo())
+         new_state.paused = self.paused
+         new_state.game_over = self.game_over
+         new_state.quit_requested = self.quit_requested
+@@ -198,12 +207,27 @@ class GameState:
+         """
+         new_state = GameState(self.get_snake(), 
+                               self.get_food_position(), 
+-                              self.get_score())
++                              self.get_score(),
++                              self.is_demo())
+         new_state.paused = not self.paused
+         new_state.game_over = self.game_over
+         new_state.quit_requested = self.quit_requested
+         return new_state
+     
++    def with_toggled_demo(self):
++        """
++        Создание состояния с переключенным 
++        флагом паузы
++        """
++        new_state = GameState(self.get_snake(), 
++                              self.get_food_position(), 
++                              self.get_score(),
++                              not self.is_demo())
++        new_state.paused = self.paused
++        new_state.game_over = self.game_over
++        new_state.quit_requested = self.quit_requested
++        return new_state
++    
+     def with_game_over(self, is_game_over: bool = True):
+         """
+         Создание состояния с установленным 
+@@ -211,7 +235,8 @@ class GameState:
+         """
+         new_state = GameState(self.get_snake(), 
+                               self.get_food_position(), 
+-                              self.get_score())
++                              self.get_score(),
++                              self.is_demo())
+         new_state.paused = self.paused
+         new_state.game_over = is_game_over
+         new_state.quit_requested = self.quit_requested
+@@ -224,7 +249,8 @@ class GameState:
+         """
+         new_state = GameState(self.get_snake(), 
+                               self.get_food_position(), 
+-                              self.get_score())
++                              self.get_score(),
++                              self.is_demo())
+         new_state.paused = self.paused
+         new_state.game_over = self.game_over
+         new_state.quit_requested = should_quit
+diff --git a/game_engine.py b/game_engine.py
+index 93ff4cd..0d45932 100644
+--- a/game_engine.py
++++ b/game_engine.py
+@@ -1,7 +1,9 @@
+ from typing import Callable, Dict, Tuple, Any, Optional, List
+ from core.base_types import Product, Sum, Unit, unit
+ from core.path import Path
++from core.hits import TorusLoopCount
+ from core.dependent_types import Pi, Sigma
++from fractions import Fraction
+ 
+ from game_data_structures import Direction, GameEvent, GameState
+ 
+@@ -24,7 +26,55 @@ class GameEngine:
+         """
+         self.game_field = game_field
+         self.current_state = initial_state
+-    
++        self.strategy = Pi(
++            domain=GameState,
++            codomain=lambda _: Direction,
++            function=lambda state:
++                self._seek(state.get_snake(), state.get_food_position()) \
++                if state.is_demo() \
++                else state.get_snake().direction
++        )
++
++    def _seek(self, snake, food_position):
++        head_x = snake.get_head().first_value
++        head_y = snake.get_head().second_value
++        food_x = food_position.first_value
++        food_y = food_position.second_value
++        width, height = self.game_field.get_dimensions()
++        dx = Fraction(food_x - head_x, width)
++        dy = Fraction(food_y - head_y, height)
++        paths = [
++            TorusLoopCount((dx, dy)),
++            TorusLoopCount((1 - dx, dy)),
++            TorusLoopCount((dx, 1 - dy)),
++            TorusLoopCount((1 - dx, 1 - dy)),
++        ]
++        measured_paths = [Product(p, sum(map(abs, p.counts))) for p in paths]
++        sorted_paths = sorted(measured_paths, key=lambda x: x.second_value)
++        first_path = sorted_paths[0].first_value
++        second_path = sorted_paths[0].first_value
++        dirs = self._path_dirs(first_path) + self._path_dirs(second_path)
++        return dirs[1] \
++            if Direction.are_opposite(dirs[0], snake.direction) \
++            else dirs[0]
++
++    def _path_dirs(self, path):
++        sign = lambda x: 1 if x > 0 else (-1 if x < 0 else 0)
++        dir_x, dir_y = tuple(map(sign, path.counts))
++        result = []
++        match dir_x:
++            case -1:
++                result.append(Direction.left())
++            case 1:
++                result.append(Direction.right())
++        match dir_y:
++            case -1:
++                result.append(Direction.up())
++            case 1:
++                result.append(Direction.down())
++        return result
++
++
+     def update(self) -> Optional[GameState]:
+         """
+         Обновление состояния игры за один игровой цикл.
+@@ -38,14 +88,15 @@ class GameEngine:
+         if self.current_state.is_paused() or \
+            self.current_state.is_game_over():
+             return None
+-            
++        
+         # Получение компонентов из текущего состояния
+         snake = self.current_state.get_snake()
+         food_position = self.current_state.get_food_position()
+         
+         # Перемещение змеи с получением пути движения 
+         # и новой змеи
+-        movement_path, new_snake = snake.move(self.game_field)
++        direction = self.strategy(self.current_state)
++        movement_path, new_snake = snake.set_direction(direction).move(self.game_field)
+         
+         # Проверка столкновения змеи с собой
+         collision_event = new_snake.check_self_collision()
+diff --git a/game_field.py b/game_field.py
+index 6bbffe3..339b7d2 100644
+--- a/game_field.py
++++ b/game_field.py
+@@ -1,8 +1,10 @@
+ from typing import Tuple, List, Any, Optional
+-from core.hits import NTorus
++from core.hits import NTorus, TorusLoopCount
+ from core.base_types import Unit, unit, Product
+ from core.path import Path
+ 
++from fractions import Fraction
++
+ class GameField:
+     def __init__(self, width: int, height: int):
+         """
+@@ -33,9 +35,13 @@ class GameField:
+             Product, представляющий позицию (x, y).
+         """
+         # Обеспечиваем закольцовывание координат по краям тора
+-        wrapped_x = x % self.width
+-        wrapped_y = y % self.height
+-        
++        point = TorusLoopCount((
++            Fraction(x, self.width),
++            Fraction(y, self.height)))
++        wrapped_point = self.torus.canonical_form(point)
++        wrapped_x = int(wrapped_point.counts[0] * self.width)
++        wrapped_y = int(wrapped_point.counts[1] * self.height)
++
+         # Создаём Product для представления позиции
+         return Product(wrapped_x, wrapped_y)
+     
+diff --git a/input_handler.py b/input_handler.py
+index 539ae49..6b3daaf 100644
+--- a/input_handler.py
++++ b/input_handler.py
+@@ -50,6 +50,7 @@ class InputHandler:
+                 ),
+                 'q': lambda state: self._set_quit_flag(state),
+                 'p': lambda state: self._toggle_pause_flag(state),
++                'd': lambda state: self._toggle_demo_flag(state),
+                 # Случай по умолчанию: возвращаем состояние без изменений
+                 'default': lambda state: state
+             }.get(key, lambda state: state)  # По умолчанию - тождественная функция
+@@ -57,6 +58,9 @@ class InputHandler:
+     
+     def _change_direction(self, state: GameState, 
+                            direction: Sum) -> GameState:
++        # Игнорируем пользовательское управление в демо-режиме
++        if state.is_demo():
++            return state
+         snake = state.get_snake()
+         new_snake = snake.set_direction(direction)  
+         return state.with_new_snake(new_snake)      
+@@ -74,6 +78,18 @@ class InputHandler:
+         """
+         return state.with_toggled_pause()
+     
++    def _toggle_demo_flag(self, state: GameState) -> GameState:
++        """
++        Создает новое состояние игры с переключенным флагом демо.
++        
++        Аргументы:
++            state: Текущее состояние игры
++            
++        Возвращает:
++            Новое состояние с переключенным флагом демо
++        """
++        return state.with_toggled_demo()
++    
+     def _set_quit_flag(self, state: GameState) -> GameState:
+         """
+         Создает новое состояние игры с установленным флагом выхода.
+diff --git a/main.py b/main.py
+index 1c35688..e51c150 100644
+--- a/main.py
++++ b/main.py
+@@ -81,6 +81,7 @@ def main():
+         # Цикл до установки флага выхода
+         while not game_engine.get_current_state()\
+               .is_quit_requested():
++
+             # Проверка ввода (неблокирующая)
+             key = term.inkey(timeout=0.01)
+             
+diff --git a/renderer.py b/renderer.py
+index 6bc32e5..a6de21b 100644
+--- a/renderer.py
++++ b/renderer.py
+@@ -66,10 +66,17 @@ class Renderer:
+                 "Press 'q' to quit."))
+         elif paused:
+             screen.append(self.term.yellow(
+-                "Game Paused. Press 'p' to resume, 'q' to quit."))
++                "Game Paused. Press 'p' to resume, 'q' to quit.    "))
++        elif game_state.is_demo():
++            screen.append(self.term.blue(
++                "Demo mode. Press 'p' to pause, 'q' to quit.       "))
++            screen.append(
++                "Press 'd' to exit demo mode. ")
+         else:
+             screen.append(
+                 "Use arrow keys to move, 'p' to pause, 'q' to quit.")
++            screen.append(
++                "Press 'd' to enter demo mode.")
+         
+         # Вывод всего экрана
+         print("\n".join(screen))
+-- 
+2.30.0.windows.2
+
