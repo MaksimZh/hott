@@ -1,0 +1,191 @@
+﻿From c4eb65b9e89cf2721ede6090e07ac74b3280f134 Mon Sep 17 00:00:00 2001
+From: Maksim Zholudev <maximzms@gmail.com>
+Date: Mon, 18 Aug 2025 11:51:56 +0300
+Subject: [PATCH 1/2] Add PrecisionCalculator
+
+---
+ core/truncation.py       | 22 ++++++++++++++++++++++
+ tests/test_truncation.py | 10 ++++++++++
+ 2 files changed, 32 insertions(+)
+
+diff --git a/core/truncation.py b/core/truncation.py
+index 724ee8e..639e3e9 100644
+--- a/core/truncation.py
++++ b/core/truncation.py
+@@ -99,3 +99,25 @@ class TruncationOperations:
+         """Implements the join operation for truncations"""
+         new_level = max(x.level, y.level) + 1
+         return Truncated((x.value, y.value), new_level)
++
++
++class PrecisionCalculator:
++
++    _truncate_to = {
++        TruncationLevel.MINUS_TWO:
++            lambda x: 1 if x > 0 else -1 if x < 0 else 0,
++        TruncationLevel.MINUS_ONE:
++            lambda x: round(x),
++        TruncationLevel.ZERO:
++            lambda x: round(x, 1),
++        TruncationLevel.ONE:
++            lambda x: round(x, 2),
++        TruncationLevel.TWO:
++            lambda x: round(x, 3),
++    }
++    
++    @staticmethod
++    def truncate(number: float, level: int) -> float:
++        fn = PrecisionCalculator._truncate_to[level]
++        result = fn(number)
++        return PrecisionCalculator._truncate_to[level](number)
+diff --git a/tests/test_truncation.py b/tests/test_truncation.py
+index 8c59619..ddb8d22 100644
+--- a/tests/test_truncation.py
++++ b/tests/test_truncation.py
+@@ -73,6 +73,16 @@ def test_truncation() -> bool:
+         except Exception:
+             assert False, "Valid relation should not raise exception"
+ 
++
++        # Test 12: Test PrecisionCalculator
++        calc = PrecisionCalculator()
++        number = 3.14159
++        assert calc.truncate(number, TruncationLevel.MINUS_TWO) == 1
++        assert calc.truncate(number, TruncationLevel.MINUS_ONE) == 3
++        assert calc.truncate(number, TruncationLevel.ZERO) == 3.1
++        assert calc.truncate(number, TruncationLevel.ONE) == 3.14
++        assert calc.truncate(number, TruncationLevel.TWO) == 3.142
++
+         return True
+     except Exception as e:
+         print(f"Truncation test failed: {str(e)}")
+-- 
+2.30.0.windows.2
+
+
+From 9e0fd8459f2d69b2d34af19e12badbd8a02bbeef Mon Sep 17 00:00:00 2001
+From: Maksim Zholudev <maximzms@gmail.com>
+Date: Mon, 18 Aug 2025 12:16:28 +0300
+Subject: [PATCH 2/2] Add factor-set constructors
+
+---
+ core/truncation.py       | 43 ++++++++++++++++++++++++++++++++++++++++
+ tests/test_truncation.py | 40 ++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 82 insertions(+), 1 deletion(-)
+
+diff --git a/core/truncation.py b/core/truncation.py
+index 639e3e9..521cfae 100644
+--- a/core/truncation.py
++++ b/core/truncation.py
+@@ -3,6 +3,7 @@ from dataclasses import dataclass
+ from typing import TypeVar, Generic, Callable, Optional
+ from .path import Path
+ #from .hits import Circle, Suspension
++from collections.abc import Mapping
+ 
+ 
+ class ProofError(RuntimeError):
+@@ -68,6 +69,48 @@ class SetTruncation(Truncated[T]):
+         if relation(x, y):
+             return Path(x, y)
+         raise ProofError("Elements are not related")
++    
++    @staticmethod
++    def create_quotient_set(
++        elements: list[T],
++        relation: Callable[[T, T], bool]
++    ) -> Mapping[T, list[T]]:
++        result = dict[T, list[T]]()
++        for x in elements:
++            key = next((k for k in result.keys() if relation(x, k)), x)
++            print(key)
++            result[key] = result.get(key, []) + [x]
++            print(result)
++        return result
++    
++    @staticmethod
++    def verify_equivalence_relation(
++        relation: Callable[[T, T], bool],
++        elements: list[T]
++    ) -> bool:
++        for a in range(len(elements)):
++            x = elements[a]
++            if not relation(x, x):
++                return False
++            for b in range(a + 1, len(elements)):
++                y = elements[b]
++                if relation(x, y) != relation(y, x):
++                    return False
++                for c in range(b + 1, len(elements)):
++                    z = elements[c]
++                    if relation(x, z) != relation(x, y) and relation(y, z):
++                        return False
++        return True
++    
++    @staticmethod
++    def find_representative(
++        element: T,
++        quotient_classes: Mapping[T, list[T]]
++    ) -> T:
++        for k, v in quotient_classes.items():
++            if element in v:
++                return k
++        assert False
+ 
+ 
+ class TruncationOperations:
+diff --git a/tests/test_truncation.py b/tests/test_truncation.py
+index ddb8d22..6b29ef5 100644
+--- a/tests/test_truncation.py
++++ b/tests/test_truncation.py
+@@ -83,7 +83,45 @@ def test_truncation() -> bool:
+         assert calc.truncate(number, TruncationLevel.ONE) == 3.14
+         assert calc.truncate(number, TruncationLevel.TWO) == 3.142
+ 
++        # Test 13: Test quotient set creation
++        assert SetTruncation.create_quotient_set(
++            [1, 2, 3, 4, 5, 6], lambda x, y: x % 3 == y % 3) == {
++                1: [1, 4],
++                2: [2, 5],
++                3: [3, 6],
++            }
++        
++        # Test 14: Test equivalence relation verification
++        assert SetTruncation.verify_equivalence_relation(
++            lambda x, y: False, [1, 2, 3, 4, 5, 6]
++        ) == False
++        assert SetTruncation.verify_equivalence_relation(
++            lambda x, y: True, [1, 2, 3, 4, 5, 6]
++        ) == True
++        assert SetTruncation.verify_equivalence_relation(
++            lambda x, y: x > y, [1, 2, 3, 4, 5, 6]
++        ) == False
++        assert SetTruncation.verify_equivalence_relation(
++            lambda x, y: x == y, [1, 2, 3, 4, 5, 6]
++        ) == True
++        assert SetTruncation.verify_equivalence_relation(
++            lambda x, y: abs(x - y) < 3, [1, 2, 3, 4, 5, 6]
++        ) == False
++
++        # Test 15: Test search for representative
++        quotient_classes = {
++            1: [1, 4],
++            2: [2, 5],
++            3: [3, 6],
++        }
++        assert SetTruncation.find_representative(1, quotient_classes) == 1
++        assert SetTruncation.find_representative(2, quotient_classes) == 2
++        assert SetTruncation.find_representative(3, quotient_classes) == 3
++        assert SetTruncation.find_representative(4, quotient_classes) == 1
++        assert SetTruncation.find_representative(5, quotient_classes) == 2
++        assert SetTruncation.find_representative(6, quotient_classes) == 3
++
+         return True
+     except Exception as e:
+         print(f"Truncation test failed: {str(e)}")
+-        return False
+\ No newline at end of file
++        return False
+-- 
+2.30.0.windows.2
+
